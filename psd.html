@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P1rotsNET</title>
+<style>
+/* Общие стили */
+body{margin:0;font-family:Tahoma;background:#e9edf1;color:black;transition:all 0.3s;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+body.dark{background:#1e1e1e;color:white;}
+body.brand{background:linear-gradient(135deg,#ff00ff,#39ff14);color:black;}
+
+/* Авторизация */
+#auth{display:flex;justify-content:center;align-items:center;flex:1;}
+.auth-box{background:#fff;padding:20px;border:1px solid #ccc;width:90%;max-width:300px;text-align:center;}
+
+/* Основное приложение */
+#app{display:none;flex:1;flex-direction:column;overflow:hidden;}
+.header{display:flex;justify-content:center;align-items:center;padding:10px;position:relative;background:#e9edf1;}
+.header input{width:300px;padding:5px;border-radius:5px;border:1px solid #ccc;}
+#searchResult{position:absolute;top:45px;left:50%;transform:translateX(-50%);background:white;color:black;max-height:200px;overflow-y:auto;width:300px;border:1px solid #ccc;border-radius:5px;z-index:10;}
+.container{display:flex;flex:1;flex-direction:row;height:calc(100% - 50px);overflow:hidden;}
+.sidebar{width:220px;padding:15px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;}
+.sidebar button{width:100%;padding:10px;border:none;border-radius:5px;cursor:pointer;text-align:left;}
+.main{flex:1;display:flex;flex-direction:column;padding:0;box-sizing:border-box;overflow:hidden;}
+.content{width:100%;height:100%;overflow:hidden;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;}
+.post{border:1px solid #ccc;margin-bottom:10px;padding:10px;border-radius:6px;background:inherit;color:inherit;}
+.post img{max-width:100%;max-height:300px;object-fit:contain;margin-top:5px;cursor:pointer;}
+.avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#bbb;cursor:pointer;}
+.banner{width:100%;height:120px;object-fit:cover;background:#ddd;border-radius:8px;}
+
+/* Чат */
+.chat-container{display:flex;flex:1;overflow:hidden;}
+.chat-list{width:220px;border-right:1px solid #ccc;overflow-y:auto;background:inherit;}
+.chat-list .chat-user{padding:10px;cursor:pointer;border-bottom:1px solid #888;}
+.chat-window{flex:1;display:flex;flex-direction:column;height:100%;overflow:hidden;}
+.chat-header{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #ccc;flex-shrink:0;}
+.messages{flex:1;overflow-y:auto;padding:5px;display:flex;flex-direction:column;gap:5px;}
+.message{max-width:70%;padding:8px 12px;border-radius:20px;display:flex;flex-direction:column;position:relative;word-wrap:break-word;}
+.message.outgoing{align-self:flex-end;background:#0084ff;color:white;border-bottom-right-radius:4px;}
+.message.incoming{align-self:flex-start;background:#e5e5ea;color:black;border-bottom-left-radius:4px;}
+.message .msg-header{font-size:12px;color:#555;margin-bottom:2px;}
+.message .msg-time{font-size:10px;color:#888;align-self:flex-end;margin-top:2px;}
+.chat-input{display:flex;gap:5px;padding:5px;border-top:1px solid #ccc;flex-shrink:0;}
+.chat-input input{flex:1;padding:10px;border-radius:20px;border:1px solid #ccc;}
+.chat-input button{padding:10px 15px;border:none;border-radius:20px;background:#0084ff;color:white;cursor:pointer;}
+
+@media(max-width:768px){.container{flex-direction:column;}.sidebar{width:100%;flex-direction:row;overflow-x:auto;}.chat-list{width:100%;display:flex;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #ccc;}.chat-window{width:100%;}.header input{width:80%;}}
+</style>
+</head>
+<body>
+<!-- Авторизация -->
+<div id="auth">
+<div class="auth-box">
+<h3>Вход / Регистрация</h3>
+<input id="username" placeholder="username"><br>
+<input id="password" type="password" placeholder="password"><br>
+<button id="registerBtn">Регистрация</button>
+<button id="loginBtn">Войти</button>
+<div id="authMsg"></div>
+</div>
+</div>
+
+<!-- Основное приложение -->
+<div id="app">
+<div class="header">
+<input id="search" placeholder="Поиск" oninput="searchUser()">
+<div id="searchResult"></div>
+</div>
+<div class="container">
+<div class="sidebar" id="sidebar">
+<button id="btnFeed">Лента</button>
+<button id="btnChat">Сообщения</button>
+<button id="btnNotifications">Уведомления</button>
+<button id="btnContacts">Контакты</button>
+<button id="btnProfile">Профиль</button>
+<button id="btnSettings">Настройки</button>
+</div>
+<div class="main">
+<div class="content" id="content"></div>
+</div>
+</div>
+</div>
+
+<script>
+// -------------------- Глобальные переменные --------------------
+let currentUser = null, currentTab='feed', currentChat=null;
+let users = JSON.parse(localStorage.users||"{}");
+let posts = JSON.parse(localStorage.posts||"[]");
+let messages = JSON.parse(localStorage.messages||"{}");
+
+function save(){localStorage.users=JSON.stringify(users);localStorage.posts=JSON.stringify(posts);localStorage.messages=JSON.stringify(messages);}
+async function hash(t){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return btoa(String.fromCharCode(...new Uint8Array(b)));}
+
+// -------------------- Авторизация --------------------
+document.getElementById('loginBtn').onclick=login;
+document.getElementById('registerBtn').onclick=register;
+
+async function login(){
+  const u=username.value.trim(), p=await hash(password.value);
+  if(!users[u]||users[u].password!==p){authMsg.innerText='Неверные данные'; return;}
+  currentUser=u;
+  auth.style.display='none';
+  app.style.display='flex';
+  render();
+}
+
+async function register(){
+  const u=username.value.trim(), p=password.value;
+  if(!u||!p){authMsg.innerText='Заполните все поля'; return;}
+  if(users[u]){authMsg.innerText='Имя занято'; return;}
+  users[u]={password:await hash(p),name:u,avatar:'',banner:'',friends:[],friendRequests:[],notifications:[]};
+  save();
+  authMsg.innerText='Аккаунт создан';
+}
+
+// -------------------- Вспомогательные --------------------
+function defaultAvatar(){return 'data:image/svg+xml;base64,'+btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="50" fill="#bbb"/></svg>');}
+function getChatId(a,b){return [a,b].sort().join('_');}
+
+// -------------------- Навигация --------------------
+document.getElementById('btnFeed').onclick=()=>openTab('feed');
+document.getElementById('btnChat').onclick=()=>openTab('chat');
+document.getElementById('btnNotifications').onclick=()=>openTab('notifications');
+document.getElementById('btnContacts').onclick=()=>openTab('contacts');
+document.getElementById('btnProfile').onclick=()=>openTab('profile');
+document.getElementById('btnSettings').onclick=openSettings;
+
+function openTab(tab){currentTab=tab;render();}
+
+// -------------------- Рендер --------------------
+function render(){
+  if(!currentUser) return;
+  switch(currentTab){
+    case 'feed': renderFeed(); break;
+    case 'chat': renderChat(); break;
+    case 'notifications': renderNotifications(); break;
+    case 'contacts': renderContacts(); break;
+    case 'profile': renderProfile(currentUser); break;
+  }
+}
+
+// -------------------- Поиск --------------------
+function searchUser(){
+  const val=search.value.trim().toLowerCase();
+  const res=document.getElementById('searchResult');
+  res.innerHTML='';
+  if(!val) return;
+  Object.keys(users).forEach(u=>{
+    if(u.toLowerCase().includes(val)&&u!==currentUser){
+      const d=document.createElement('div');
+      d.innerText=u;
+      d.style.padding='5px';
+      d.style.cursor='pointer';
+      d.onclick=()=>{renderProfile(u);res.innerHTML='';search.value='';};
+      res.appendChild(d);
+    }
+  });
+}
+
+// -------------------- Лента --------------------
+function renderFeed(){
+  const content=document.getElementById('content');
+  content.innerHTML=`<h3>Лента</h3>
+    <input id='text' placeholder='Что у вас нового?'>
+    <input type='file' id='img' accept='image/*'>
+    <button onclick='createPost()'>Пост</button>
+    <div id='feed'></div>`;
+  const f=document.getElementById('feed');
+  posts.slice().reverse().forEach(p=>{
+    const u=users[p.user];
+    const d=document.createElement('div');
+    d.className='post';
+    d.innerHTML=`<div style='display:flex;gap:10px;align-items:center;'>
+      <img src='${u.avatar||defaultAvatar()}' class='avatar' onclick='renderProfile("${p.user}")'>
+      <b onclick='renderProfile("${p.user}")' style='cursor:pointer'>${u.name}</b>
+      </div>
+      <div>${p.text}</div>
+      ❤️ ${p.likes||0} 👁 ${p.views||0}`;
+    if(p.img){const i=document.createElement('img'); i.src=p.img; d.appendChild(i);}
+    f.appendChild(d);
+  });
+}
+
+function createPost(){
+  const text=document.getElementById('text').value;
+  const imgFile=document.getElementById('img').files[0];
+  if(!text && !imgFile) return;
+  const post={user:currentUser,text:text,likes:0,views:0};
+  if(imgFile){
+    const reader=new FileReader();
+    reader.onload=function(e){post.img=e.target.result; posts.push(post); save(); renderFeed();}
+    reader.readAsDataURL(imgFile);
+  }else{posts.push(post); save(); renderFeed();}
+  document.getElementById('text').value=''; document.getElementById('img').value='';
+}
+
+// -------------------- Профиль --------------------
+function renderProfile(user){
+  const content=document.getElementById('content');
+  const u=users[user]; const isMe=user===currentUser;
+  content.innerHTML=`<div style='text-align:center;'>
+      <img src='${u.banner||''}' class='banner'><br>
+      <img src='${u.avatar||defaultAvatar()}' class='avatar'><br>
+      <b>${u.name}</b><br>
+      ${isMe?`<button onclick='openProfileSettings()'>Настроить профиль</button>`:
+      (!users[currentUser].friends.includes(user)&&!u.friendRequests.includes(currentUser)?`<button onclick='addFriend("${user}")'>Добавить в друзья</button>`:`<span>Запрос отправлен</span>`)}
+      </div><h4>Посты</h4><div id='mp'></div>`;
+  const mp=document.getElementById('mp');
+  posts.filter(p=>p.user===user).forEach(p=>{
+    const d=document.createElement('div'); d.className='post';
+    d.innerHTML=`<div style='display:flex;gap:10px;align-items:center;'>
+      <img src='${u.avatar||defaultAvatar()}' class='avatar'>
+      <b>${u.name}</b></div>
+      <div>${p.text}</div>`;
+    if(p.img){const i=document.createElement('img');i.src=p.img; d.appendChild(i);}
+    mp.appendChild(d);
+  });
+}
+
+// -------------------- Настройки профиля с файлами --------------------
+function openProfileSettings(){
+  const u=users[currentUser];
+  const content=document.getElementById('content');
+  content.innerHTML=`<div style='padding:20px;background:#36393f;color:white;border-radius:10px;'>
+      <h3>Настройки профиля</h3>
+      <label>Имя: </label><input id='profileName' value='${u.name}'><br><br>
+      <label>Аватар: </label><input id='profileAvatarFile' type='file' accept='image/*'><br><br>
+      <label>Баннер: </label><input id='profileBannerFile' type='file' accept='image/*'><br><br>
+      <button onclick='saveProfileSettingsFiles()'>Сохранить</button>
+      </div>`;
+}
+
+function saveProfileSettingsFiles(){
+  const u=users[currentUser];
+  u.name=document.getElementById('profileName').value;
+  const avatarFile=document.getElementById('profileAvatarFile').files[0];
+  const bannerFile=document.getElementById('profileBannerFile').files[0];
+
+  if(avatarFile){
+    const reader=new FileReader();
+    reader.onload=function(e){ u.avatar=e.target.result; save(); if(!bannerFile){ alert('Профиль обновлён'); renderProfile(currentUser);} };
+    reader.readAsDataURL(avatarFile);
+  }
+  if(bannerFile){
+    const reader=new FileReader();
+    reader.onload=function(e){ u.banner=e.target.result; save(); if(!avatarFile){ alert('Профиль обновлён'); renderProfile(currentUser);} };
+    reader.readAsDataURL(bannerFile);
+  }
+  if(!avatarFile && !bannerFile){save(); alert('Профиль обновлён'); renderProfile(currentUser);}
+}
+
+// -------------------- Дружба --------------------
+function addFriend(user){ const u=users[user]; if(!u.friendRequests.includes(currentUser)&&!u.friends.includes(currentUser)){u.friendRequests.push(currentUser); save(); alert('Запрос на дружбу отправлен');}}
+
+// -------------------- Настройки --------------------
+function openSettings(){
+  const content=document.getElementById('content');
+  content.innerHTML=`<div style='padding:20px;background:#36393f;color:white;border-radius:10px;'>
+    <h3>Настройки</h3>
+    <button onclick='logout()'>Выйти / Сменить аккаунт</button><br><br>
+    <label>Тема: </label>
+    <select onchange='changeTheme(this.value)'>
+      <option value='light'>Светлая</option>
+      <option value='dark'>Тёмная</option>
+      <option value='brand'>Фірмова</option>
+    </select>
+    <br><br>
+    <button onclick='openProfileSettings()'>Настройки профиля</button>
+  </div>`;
+}
+
+function changeTheme(val){
+  document.body.className=''; const sidebar=document.getElementById('sidebar'); sidebar.className='sidebar';
+  if(val==='dark'){document.body.classList.add('dark'); sidebar.classList.add('dark');}
+  else if(val==='brand'){document.body.classList.add('brand'); sidebar.classList.add('brand');}
+  render();
+}
+
+function logout(){location.reload();}
+
+// -------------------- Чат --------------------
+function renderChat(){
+  const content=document.getElementById('content');
+  content.innerHTML=`<div class='chat-container'>
+      <div class='chat-list' id='chatList'></div>
+      <div class='chat-window'>
+        <div class='chat-header' id='chatHeader'>Выберите чат</div>
+        <div class='messages' id='chatBox'></div>
+        <div class='chat-input'>
+          <input id='msg' placeholder='Сообщение'>
+          <button onclick='sendMsg()'>Отправить</button>
+        </div>
+      </div>
+    </div>`;
+  const cl=document.getElementById('chatList');
+  Object.keys(users).forEach(u=>{
+    if(u===currentUser) return;
+    const d=document.createElement('div'); d.className='chat-user'; d.innerText=u;
+    d.onclick=()=>{currentChat=getChatId(currentUser,u); loadMsgs(); document.getElementById('chatHeader').innerHTML=`<img src='${users[u].avatar||defaultAvatar()}' class='avatar'><b>${u}</b>`;}
+    cl.appendChild(d);
+  });
+}
+
+function loadMsgs(){
+  const box=document.getElementById('chatBox'); if(!currentChat) return; box.innerHTML='';
+  const msgs=messages[currentChat]||[];
+  msgs.forEach(m=>{
+    const d=document.createElement('div'); d.className=(m.from===currentUser?'message outgoing':'message incoming');
+    d.innerHTML=`<div class='msg-header'>${m.from}</div><div>${m.text}</div><div class='msg-time'>${new Date(m.time).toLocaleString()}</div>`;
+    box.appendChild(d);
+  });
+  box.scrollTop=box.scrollHeight;
+}
+
+function sendMsg(){
+  const input=document.getElementById('msg'); if(!input.value.trim()||!currentChat) return;
+  messages[currentChat]=messages[currentChat]||[];
+  messages[currentChat].push({from:currentUser,text:input.value,time:Date.now()});
+  input.value=''; save(); loadMsgs();
+}
+
+// -------------------- Уведомления --------------------
+function renderNotifications(){
+  const content=document.getElementById('content');
+  content.innerHTML=`<h3>Уведомления</h3><div id='notifList'></div>`;
+  const list=document.getElementById('notifList');
+  const notifs=users[currentUser].notifications||[];
+  if(!notifs.length) list.innerHTML='<p>Нет уведомлений</p>';
+  else notifs.forEach(n=>{const d=document.createElement('div'); d.innerText=n; list.appendChild(d);});
+}
+
+// -------------------- Контакты --------------------
+function renderContacts(){
+  const content=document.getElementById('content');
+  content.innerHTML=`<h3>Контакты</h3><div id='contactList'></div>`;
+  const cl=document.getElementById('contactList');
+  users[currentUser].friends.forEach(f=>{const d=document.createElement('div'); d.innerText=f; d.onclick=()=>renderProfile(f); cl.appendChild(d);});
+}
+</script>
+</body>
+</html>
